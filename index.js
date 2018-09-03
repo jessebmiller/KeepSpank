@@ -19,19 +19,70 @@ const maintain = async (bank, delegateKey) => {
   console.log("maintaining", delegateKey)
   const currentPeriod = await bank.currentPeriod()
   const spankPoints = await bank.getSpankPoints(delegateKey, currentPeriod + 1)
-  if (spankPoints === "0") {
-    const stakerAddress = await bank.stakerByDelegateKey(delegateKey)
-    const staker = await bank.stakers(stakerAddress)
-    bank.web3.eth.defaultAccount = delegateKey
-    await bank.web3.personal.unlockAccount(delegateKey, passwords[delegateKey])
-    const tx = await bank.checkIn(staker.endingPeriod + 1)
-    console.log(tx)
+  if (spankPoints !== "0") {
+    console.log(
+      `${delegateKey} has ${spankPoints} points next period.`,
+      "Already checked in. skipping."
+    )
+    return
   }
+
+  const stakerAddress = await bank.stakerByDelegateKey(delegateKey)
+  if (parseInt(stakerAddress, 16) === 0) {
+    console.warn(
+      `${stakerAddress} staker, has ${delegateKey} been delegated yet?`,
+      'skipping.'
+    )
+    return
+  }
+  const staker = await bank.stakers(stakerAddress)
+
+  if (!(staker.delegateKey === delegateKey)) {
+    console.error(
+      `Unexpected delegate key ${delegateKey}. Expected ${staker.delegateKey}`,
+      "skipping"
+    )
+    return
+  }
+  bank.web3.eth.defaultAccount = delegateKey
+  await bank.web3.personal.unlockAccount(delegateKey, passwords[delegateKey])
+  const tx = await bank.checkIn(staker.endingPeriod + 1)
+  console.log(tx)
 }
 
-web3.eth.accounts.forEach((a) => {
-  maintain(bank, a)
-})
+const maintainAll = () => {
+  bank.web3.eth.accounts.forEach((a) => {
+    maintain(bank, a)
+  })
+}
 
+const second = 1000
+const minute = second * 60
+const hour = minute * 60
+const day = hour * 24
 
+const interval = process.env.INTERVAL_SECONDS
+      ? parseInt(process.env.INTERVAL_SECONDS, 10) * 1000
+      : day
+
+const logWaiting = () => {console.log(`Waiting ${interval / 1000} seconds`)}
+
+const main = () => {
+  maintainAll()
+  logWaiting()
+  const timeout = setInterval(
+    () => {
+      maintainAll()
+      logWaiting()
+    },
+    interval
+  )
+  process.on("SIGINT", () => {
+    clearTimeout(timeout)
+    process.exit()
+  })
+
+}
+
+main()
 
